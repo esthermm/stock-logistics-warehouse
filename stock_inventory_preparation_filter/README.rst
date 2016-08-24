@@ -15,6 +15,8 @@ Includes more options for making an inventory out of:
 It also allows to make an inventory based on scanned products, adding a line
 with product code and quantity.
 
+It also includes an option to prepare inventory with products with no quants.
+
 Usage
 =====
 
@@ -42,6 +44,7 @@ Contributors
 
 * Oihane Crucelaegui <oihanecrucelaegi@avanzosc.es>
 * Pedro M. Baeza <pedro.baeza@serviciosbaeza.com>
+* Esther Martín <esthermartin@avanzosc.es>
 
 Maintainer
 ----------

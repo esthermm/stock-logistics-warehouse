@@ -1,22 +1,9 @@
-# -*- encoding: utf-8 -*-
-##############################################################################
-#
-#    This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as published
-#    by the Free Software Foundation, either version 3 of the License, or
-#    (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU General Public License for more details.
-#
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see http://www.gnu.org/licenses/.
-#
-##############################################################################
+# -*- coding: utf-8 -*-
+# (c) 2015 Oihane Crucelaegui - AvanzOSC
+# (c) 2015 Esther Martín - AvanzOSC
+# License AGPL-3 - See http://www.gnu.org/licenses/agpl-3.0.html
 
-from openerp import models, fields, api, _
+from openerp import _, api, fields, models
 
 
 class StockInventoryEmptyLines(models.Model):
@@ -43,6 +30,19 @@ class StockInventoryFake(object):
 
 class StockInventory(models.Model):
     _inherit = 'stock.inventory'
+
+    def _get_inventory_line_value(self, inventory, product):
+        vals = []
+        product_line = {}
+        product_line['inventory_id'] = inventory.id
+        product_line['theoretical_qty'] = 0
+        product_line['product_id'] = product.id
+        product_line['product_uom_id'] = product.uom_id.id
+        product_line['location_id'] = inventory.location_id.id
+        product_line['package_id'] = inventory.package_id.id
+        product_line['partner_id'] = inventory.partner_id.id
+        vals.append(product_line)
+        return vals
 
     @api.model
     def _get_available_filters(self):
@@ -75,13 +75,36 @@ class StockInventory(models.Model):
     empty_line_ids = fields.One2many(
         comodel_name='stock.inventory.line.empty', inverse_name='inventory_id',
         string='Capture Lines')
+    all_products = fields.Boolean(
+        default=False, help='If this field is active, the inventory will show '
+        'ALL products that comply with the selected filter.',
+        string='Show all products')
+
+    @api.multi
+    def _check_all_products(self, inventory, product):
+        if inventory.all_products:
+            return self._get_inventory_line_value(inventory, product)
 
     @api.model
     def _get_inventory_lines(self, inventory):
         vals = []
         product_tmpl_obj = self.env['product.template']
         product_obj = self.env['product.product']
-        if inventory.filter in ('categories', 'products'):
+        if inventory.all_products and inventory.filter == 'product' and \
+                not len(vals):
+            vals += self._get_inventory_line_value(
+                inventory, inventory.product_id)
+        elif inventory.filter == 'none' and inventory.all_products:
+            vals = super(StockInventory, self)._get_inventory_lines(inventory)
+            product_quant = []
+            for prod in vals:
+                product_quant.append(prod['product_id'])
+            products = self.env['product.product'].search([
+                ('id', 'not in', product_quant),
+                ('type', '=', 'product')])
+            for line in products:
+                vals += self._get_inventory_line_value(inventory, line)
+        elif inventory.filter in ('categories', 'products'):
             products = product_obj
             if inventory.filter == 'categories':
                 product_tmpls = product_tmpl_obj.search(
@@ -92,13 +115,17 @@ class StockInventory(models.Model):
                 products = inventory.product_ids
             for product in products:
                 fake_inventory = StockInventoryFake(inventory, product=product)
-                vals += super(StockInventory, self)._get_inventory_lines(
-                    fake_inventory)
+                res = super(StockInventory, self)._get_inventory_lines(
+                    fake_inventory) or self._check_all_products(
+                    inventory, product) or []
+                vals += res
         elif inventory.filter == 'lots':
             for lot in inventory.lot_ids:
                 fake_inventory = StockInventoryFake(inventory, lot=lot)
-                vals += super(StockInventory, self)._get_inventory_lines(
-                    fake_inventory)
+                res = super(StockInventory, self)._get_inventory_lines(
+                    fake_inventory) or self._check_all_products(
+                    inventory, product) or []
+                vals += res
         elif inventory.filter == 'empty':
             tmp_lines = {}
             empty_line_obj = self.env['stock.inventory.line.empty']
@@ -120,6 +147,10 @@ class StockInventory(models.Model):
                     values = super(StockInventory, self)._get_inventory_lines(
                         fake_inventory)
                     if values:
+                        values[0]['product_qty'] = tmp_lines[product_code]
+                    elif not values and inventory.all_products:
+                        values = self._get_inventory_line_value(
+                            inventory, product)
                         values[0]['product_qty'] = tmp_lines[product_code]
                     else:
                         empty_line_obj.create(
